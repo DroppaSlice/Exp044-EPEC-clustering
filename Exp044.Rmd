@@ -1,0 +1,88 @@
+---
+title: "Exp044"
+output: html_notebook
+---
+## Exp044-1: Reading blast results from virulence genes and making presence absence tables
+
+```{r reading and parsing blast results}
+library(stringr)
+library(seqinr)
+library(dplyr)
+
+read.blast <- function(filepath){
+  x <- read.table(file = filepath,
+                  col.names = c("qseqid", "sseqid", "pident", "length", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore"))
+  return(x)
+}
+
+effectors_df <- read.blast(filepath = "Exp044-1/outputs/EPEC_effectors_blast.txt") %>% 
+  mutate(accession.no = str_sub(sseqid, 8, 11)) %>%
+  mutate(accession.no = as.factor(accession.no)) %>%
+  mutate(qseqid = as.factor(qseqid))
+
+length(levels(effectors_df$accession.no))
+length(levels(effectors_df$qseqid))
+
+effector_pa <-table(effectors_df$accession.no, effectors_df$qseqid)
+effector_pa <- (effector_pa >= 1) * 1
+
+write.csv(effector_pa, file = "Exp044-1/outputs/effector_presenceAbsence.csv")
+
+pas_pa <- read.csv(file = "metadata/pas_presenceAbsence.csv")
+effector_pa <- as.data.frame(effector_pa) %>% 
+  tibble::rownames_to_column("accession.no") %>%
+  right_join(pas_pa[,c(1,6:11)], by = "accession.no") %>%
+  tibble::column_to_rownames(var = "accession.no") %>%
+  select(!Map)
+
+```
+
+```{r clustering}
+library(factoextra)
+library(ggsci)
+
+scaled_df <- na.omit(scale(t(effector_pa)))
+
+fviz_nbclust(scaled_df, kmeans, method="gap_stat")
+
+res.effectors <- hkmeans(scaled_df, 7)
+
+res.effectors
+
+plot.effectors <- fviz_cluster(res.effectors,
+                               data = scaled_df,
+                               ggtheme = theme_bw(),
+                               ellipse = T,
+                               repel = T, 
+                               shape = 16) + 
+  scale_color_nejm() +
+  scale_fill_nejm() + 
+  ggtitle("Clustering of genes by Presence vs. Absence")
+
+plot.effectors
+```
+
+## Unrelated testing
+
+```{r PasA1 or PasA2}
+library(dplyr)
+
+hazen_df <- read.csv(file = "metadata/Hazen2016_genomes.csv") %>% 
+  dplyr::select(accession.no, clin.outcome) %>%
+  dplyr::mutate(accession.no = str_sub(hazen_df$accession.no, 1, 4)) %>%
+  mutate(clin.outcome = as.factor(hazen_df$clin.outcome))
+  
+pas_pa <- read.csv(file = "metadata/pas_presenceAbsence.csv")  
+  
+pas_pa <- pas_pa %>%
+  dplyr::select(accession.no, pasA1, pasA2, pasC) %>%
+  dplyr::left_join(hazen_df, by = "accession.no")
+
+count_df <- data.frame(
+  pasA1 = table(pas_pa[pas_pa$pasA1==1, "clin.outcome"]),
+  pasA2 = table(pas_pa[pas_pa$pasA2==1, "clin.outcome"]),
+  pasC = table(pas_pa[pas_pa$pasC==1, "clin.outcome"]),
+  total = table(pas_pa[, "clin.outcome"])
+)
+
+```
